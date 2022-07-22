@@ -11,33 +11,41 @@ from src.utils import serialize, deserialize
 
 
 def master():
-    # initialize zmq socket
+    # initialize master listen socket
     zmq_context = zmq.Context()
     master_listen_socket = zmq_context.socket(zmq.PULL)
     master_address = f"tcp://*:{config.master_port_inside}"
     master_listen_socket.bind(master_address)
-    print(f"[{os.getpid()}] Master listens at {config.master_port_inside}.")
+    print(f"[master (pid={os.getpid()})] Master listens at {config.master_port_inside}.")
 
-    # main loop
+    # initialize master send socket
+    master_send_socket_list = []
+    for worker_ip in config.worker_ip_list:
+        master_send_socket = zmq_context.socket(zmq.PUSH)
+        worker_address = f"tcp://{worker_ip}:{config.worker_port_outside}"
+        master_send_socket.connect(worker_address)
+        master_send_socket_list.append(master_send_socket)
+        print(f"[master (pid={os.getpid()})] Master connects to worker at {worker_address}.")
+
+    # start main loop
     while True:
-        raw_msg = master_listen_socket.recv()
-        msg = deserialize(raw_msg)
-        print(msg)
+        time.sleep(1)
 
 
 def worker():
-    # initialize zmq socket
+    # initialize master listen socket
     zmq_context = zmq.Context()
     master_listen_socket = zmq_context.socket(zmq.PUSH)
     master_address = f"tcp://{config.master_ip}:{config.master_port_outside}"
     master_listen_socket.connect(master_address)
-    print(f"[{os.getpid()}] Contact master at {master_address}.")
+    print(f"[worker (pid={os.getpid()})] Connect to master at {master_address}.")
 
-    # main loop
-    counter = 0
+    # initialize worker listen socket
+    worker_listen_socket = zmq_context.socket(zmq.PULL)
+    worker_address = f"tcp://*:{config.worker_port_inside}"
+    worker_listen_socket.bind(worker_address)
+    print(f"[worker (pid={os.getpid()})] Listens at {worker_address}.")
+
+    # start main loop
     while True:
-        msg = f"Client Message {counter}"
-        master_listen_socket.send(serialize(msg))
-        print(f"Client sends: {msg}")
-        counter += 1
         time.sleep(1)
