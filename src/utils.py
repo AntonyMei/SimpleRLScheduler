@@ -3,16 +3,20 @@ Yixuan Mei, 2022.07.22
 This file contains structs and functions used by the scheduler.
 """
 import pickle
-from enum import Enum
+import subprocess as sp
+from enum import Enum, auto
 
 
-class CommandType(Enum):
-    GPU_USAGE = 0
+class PacketType(Enum):
+    WORKER_IDENTITY = 0
+    GPU_USAGE_MASTER = auto()
+    GPU_USAGE_WORKER = auto()
 
 
 class Packet:
-    def __init__(self, command_type: CommandType):
-        self.command_type = command_type
+    def __init__(self, packet_type: PacketType, additional_info=None):
+        self.packet_type = packet_type
+        self.additional_info = additional_info
 
 
 def serialize(obj, file=None):
@@ -42,3 +46,19 @@ def deserialize(data_stream):
     """
     deserialized_object = pickle.loads(data=data_stream)
     return deserialized_object
+
+
+def get_gpu_memory():
+    """
+    Returns available gpu memory for each available gpu
+    https://stackoverflow.com/questions/59567226/how-to-programmatically-determine-available-gpu-memory-with-tensorflow
+    """
+
+    # internal tool function
+    def _output_to_list(x):
+        return x.decode('ascii').split('\n')[:-1]
+
+    command = "nvidia-smi --query-gpu=memory.free --format=csv"
+    memory_free_info = _output_to_list(sp.check_output(command.split()))[1:]
+    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    return memory_free_values

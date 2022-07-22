@@ -2,8 +2,9 @@
 Yixuan Mei, 2022.07.22
 This file is entry point to scheduler.
 """
-from src.scheduler import master, worker
 import argparse
+
+from src.scheduler import master, worker
 
 
 def main():
