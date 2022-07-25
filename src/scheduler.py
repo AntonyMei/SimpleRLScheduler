@@ -3,6 +3,7 @@ Yixuan Mei, 2022.07.22
 This file contains the scheduler per se.
 """
 import os
+import multiprocessing as mp
 import subprocess
 
 import zmq
@@ -137,6 +138,7 @@ def worker():
 
     # start main loop
     running_worker_process = None
+    ctx = mp.get_context("spawn")
     while True:
         raw_packet = worker_listen_socket.recv()
         packet = deserialize(raw_packet)
@@ -149,7 +151,8 @@ def worker():
         elif packet.packet_type == PacketType.START_QUERY:
             # run target process
             if running_worker_process is None:
-                running_worker_process = subprocess.run(args=("bash", "workload_worker.sh", f"{cur_worker_id}"))
+                running_worker_process = ctx.Process(target=start_workload_worker, args=(cur_worker_id,))
+                running_worker_process.start()
                 succeeded = True
             else:
                 succeeded = False
@@ -178,6 +181,7 @@ def trainer():
 
     # start main loop
     running_trainer_process = None
+    ctx = mp.get_context("spawn")
     while True:
         raw_packet = master2trainer_socket.recv()
         packet = deserialize(raw_packet)
@@ -190,7 +194,8 @@ def trainer():
         elif packet.packet_type == PacketType.START_QUERY:
             # run target process
             if running_trainer_process is None:
-                running_trainer_process = subprocess.run(args=("bash", "workload_train.sh"))
+                running_trainer_process = ctx.Process(target=start_workload_trainer)
+                running_trainer_process.start()
                 succeeded = True
             else:
                 succeeded = False
@@ -200,3 +205,11 @@ def trainer():
             trainer2master_socket.send(serialized_reply_packet)
         else:
             print(f"Received unsupported packet with type {packet.packet_type}")
+
+
+def start_workload_worker(worker_idx):
+    subprocess.run(args=("bash", "workload_worker.sh", f"{worker_idx}"))
+
+
+def start_workload_trainer():
+    subprocess.run(args=("bash", "workload_train.sh"))
