@@ -11,6 +11,8 @@ class PacketType(Enum):
     WORKER_IDENTITY = 0
     GPU_USAGE_QUERY = auto()
     GPU_USAGE_REPLY = auto()
+    START_QUERY = auto()
+    START_REPLY = auto()
 
 
 class Packet:
