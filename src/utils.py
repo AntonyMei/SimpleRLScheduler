@@ -9,8 +9,8 @@ from enum import Enum, auto
 
 class PacketType(Enum):
     WORKER_IDENTITY = 0
-    GPU_USAGE_MASTER = auto()
-    GPU_USAGE_WORKER = auto()
+    GPU_USAGE_QUERY = auto()
+    GPU_USAGE_REPLY = auto()
 
 
 class Packet:

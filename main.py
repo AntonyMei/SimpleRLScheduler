@@ -4,13 +4,13 @@ This file is entry point to scheduler.
 """
 import argparse
 
-from src.scheduler import master, worker
+from src.scheduler import master, worker, trainer
 
 
 def main():
     # parse argument
     parser = argparse.ArgumentParser(description="SimpleRLScheduler")
-    parser.add_argument("--type", required=True, help="master / worker")
+    parser.add_argument("--type", required=True, help="master / trainer / worker")
     args = parser.parse_args()
 
     # start scheduler
@@ -18,6 +18,8 @@ def main():
         master()
     elif args.type == "worker":
         worker()
+    elif args.type == "trainer":
+        trainer()
     else:
         raise NotImplementedError
 

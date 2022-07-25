@@ -18,7 +18,7 @@ def master():
     master_listen_socket = zmq_context.socket(zmq.PULL)
     master_address = f"tcp://*:{config.master_port_inside}"
     master_listen_socket.bind(master_address)
-    print(f"[master (pid={os.getpid()})] Master listens at {config.master_port_inside}.")
+    print(f"[master (pid={os.getpid()})] Master listens to workers at {config.master_port_inside}.")
 
     # initialize master send socket
     master_send_socket_list = []
@@ -39,20 +39,36 @@ def master():
         master_send_socket.send(serialized_initial_packet)
     assert cur_worker_id == total_worker_count
 
+    # initialize master <-> trainer connection
+    master2trainer_socket = zmq_context.socket(zmq.PUSH)
+    trainer2master_socket = zmq_context.socket(zmq.PULL)
+    master2trainer_addr = f"tcp://127.0.0.1:{config.master2trainer_port}"
+    trainer2master_addr = f"tcp://127.0.0.1:{config.trainer2master_port}"
+    master2trainer_socket.bind(master2trainer_addr)
+    trainer2master_socket.connect(trainer2master_addr)
+    print(f"[master (pid={os.getpid()})] master -> trainer: {config.master2trainer_port}.")
+    print(f"[master (pid={os.getpid()})] trainer -> master: {config.trainer2master_port}.")
+
     # start main loop
     while True:
         command = input("Scheduler >>")
         if command == "gpu":
-            # prepare packet and send
-            packet = Packet(packet_type=PacketType.GPU_USAGE_MASTER)
+            # prepare packet and send to trainer & worker
+            packet = Packet(packet_type=PacketType.GPU_USAGE_QUERY)
             serialized_packet = serialize(packet)
+            master2trainer_socket.send(serialized_packet)
             for master_send_socket in master_send_socket_list:
                 master_send_socket.send(serialized_packet)
+            # gather reply from trainer
+            raw_trainer_reply_packet = trainer2master_socket.recv()
+            reply_packet = deserialize(raw_trainer_reply_packet)
+            assert reply_packet.packet_type == PacketType.GPU_USAGE_REPLY
+            print(f"Trainer on local machine: {reply_packet.additional_info}")
             # gather reply from all workers
             for _ in range(total_worker_count):
                 raw_reply_packet = master_listen_socket.recv()
                 reply_packet = deserialize(raw_reply_packet)
-                assert reply_packet.packet_type == PacketType.GPU_USAGE_WORKER
+                assert reply_packet.packet_type == PacketType.GPU_USAGE_REPLY
                 reply_worker_id = reply_packet.additional_info[0]
                 reply_worker_ip = reply_packet.additional_info[1]
                 gpu_memory_list = reply_packet.additional_info[2]
@@ -81,17 +97,45 @@ def worker():
     assert initial_packet.packet_type == PacketType.WORKER_IDENTITY
     cur_worker_id = initial_packet.additional_info[0]
     cur_worker_ip = initial_packet.additional_info[1]
-    print(f"Current worker is worker {cur_worker_id} at {cur_worker_ip}")
+    print(f"[worker (pid={os.getpid()})] Current worker is worker {cur_worker_id} at {cur_worker_ip}")
 
     # start main loop
     while True:
         raw_packet = worker_listen_socket.recv()
         packet = deserialize(raw_packet)
-        if packet.packet_type == PacketType.GPU_USAGE_MASTER:
+        if packet.packet_type == PacketType.GPU_USAGE_QUERY:
             gpu_memory_list = get_gpu_memory()
-            reply_packet = Packet(packet_type=PacketType.GPU_USAGE_WORKER,
+            reply_packet = Packet(packet_type=PacketType.GPU_USAGE_REPLY,
                                   additional_info=[cur_worker_id, cur_worker_ip, gpu_memory_list])
             serialized_reply_packet = serialize(reply_packet)
             master_listen_socket.send(serialized_reply_packet)
+        else:
+            print(f"Received unsupported packet with type {packet.packet_type}")
+
+
+def trainer():
+    # initialize zmq context
+    zmq_context = zmq.Context()
+
+    # initialize master <-> trainer connection
+    master2trainer_socket = zmq_context.socket(zmq.PULL)
+    trainer2master_socket = zmq_context.socket(zmq.PUSH)
+    master2trainer_addr = f"tcp://127.0.0.1:{config.master2trainer_port}"
+    trainer2master_addr = f"tcp://127.0.0.1:{config.trainer2master_port}"
+    master2trainer_socket.connect(master2trainer_addr)
+    trainer2master_socket.bind(trainer2master_addr)
+    print(f"[trainer (pid={os.getpid()})] master -> trainer: {config.master2trainer_port}.")
+    print(f"[trainer (pid={os.getpid()})] trainer -> master: {config.trainer2master_port}.")
+
+    # start main loop
+    while True:
+        raw_packet = master2trainer_socket.recv()
+        packet = deserialize(raw_packet)
+        if packet.packet_type == PacketType.GPU_USAGE_QUERY:
+            gpu_memory_list = get_gpu_memory()
+            reply_packet = Packet(packet_type=PacketType.GPU_USAGE_REPLY,
+                                  additional_info=gpu_memory_list)
+            serialized_reply_packet = serialize(reply_packet)
+            trainer2master_socket.send(serialized_reply_packet)
         else:
             print(f"Received unsupported packet with type {packet.packet_type}")
