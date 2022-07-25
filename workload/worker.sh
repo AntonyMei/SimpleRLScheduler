@@ -1,0 +1,1 @@
+python sample_workload.py --type worker --worker_id $1

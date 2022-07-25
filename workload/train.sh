@@ -1,0 +1,1 @@
+python sample_workload.py --type trainer --worker_id -1
