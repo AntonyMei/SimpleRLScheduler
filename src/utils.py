@@ -13,6 +13,8 @@ class PacketType(Enum):
     GPU_USAGE_REPLY = auto()
     START_QUERY = auto()
     START_REPLY = auto()
+    STOP_QUERY = auto()
+    STOP_REPLY = auto()
 
 
 class Packet:

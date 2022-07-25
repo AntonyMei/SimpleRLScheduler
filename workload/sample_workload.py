@@ -12,12 +12,12 @@ def main():
     # start scheduler
     if args.type == "trainer":
         print("Sample workload: trainer starts")
-        time.sleep(10)
+        time.sleep(5)
         print("Sample workload: trainer finished")
     elif args.type == "worker":
         cur_worker_id = args.worker_id
         print(f"Sample workload: worker {cur_worker_id} starts")
-        time.sleep(15)
+        time.sleep(6)
         print(f"Sample workload: worker {cur_worker_id} finished")
     else:
         raise NotImplementedError

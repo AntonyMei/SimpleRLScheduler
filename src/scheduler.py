@@ -3,8 +3,8 @@ Yixuan Mei, 2022.07.22
 This file contains the scheduler per se.
 """
 import os
-import multiprocessing as mp
 import subprocess
+import psutil
 
 import zmq
 
@@ -110,6 +110,36 @@ def master():
                 else:
                     print(f"Worker {reply_worker_id} at {reply_worker_ip}: Failed to start"
                           f" worker {reply_worker_id}!")
+        elif command == "stop":
+            """
+            Stop trainer and worker
+            """
+            # prepare packet and send to trainer & worker
+            packet = Packet(packet_type=PacketType.STOP_QUERY)
+            serialized_packet = serialize(packet)
+            master2trainer_socket.send(serialized_packet)
+            for master_send_socket in master_send_socket_list:
+                master_send_socket.send(serialized_packet)
+            # gather reply from trainer
+            raw_trainer_reply_packet = trainer2master_socket.recv()
+            reply_packet = deserialize(raw_trainer_reply_packet)
+            assert reply_packet.packet_type == PacketType.STOP_REPLY
+            if reply_packet.additional_info:
+                print(f"Trainer on local machine: trainer stopped!")
+            else:
+                print(f"Trainer on local machine: no pending trainer!")
+            # gather reply from all workers
+            for _ in range(total_worker_count):
+                raw_reply_packet = master_listen_socket.recv()
+                reply_packet = deserialize(raw_reply_packet)
+                assert reply_packet.packet_type == PacketType.STOP_REPLY
+                reply_worker_id = reply_packet.additional_info[0]
+                reply_worker_ip = reply_packet.additional_info[1]
+                succeeded = reply_packet.additional_info[2]
+                if succeeded:
+                    print(f"Worker {reply_worker_id} at {reply_worker_ip}: worker {reply_worker_id} stopped!")
+                else:
+                    print(f"Worker {reply_worker_id} at {reply_worker_ip}: no pending worker!")
         else:
             print(f"Unknown command: {command}")
 
@@ -138,7 +168,6 @@ def worker():
 
     # start main loop
     running_worker_process = None
-    ctx = mp.get_context("spawn")
     while True:
         raw_packet = worker_listen_socket.recv()
         packet = deserialize(raw_packet)
@@ -149,15 +178,27 @@ def worker():
             serialized_reply_packet = serialize(reply_packet)
             master_listen_socket.send(serialized_reply_packet)
         elif packet.packet_type == PacketType.START_QUERY:
-            # run target process
+            # run worker process
             if running_worker_process is None:
-                running_worker_process = ctx.Process(target=start_workload_worker, args=(cur_worker_id,))
-                running_worker_process.start()
+                running_worker_process = subprocess.Popen(f"exec bash workload_worker.sh {cur_worker_id}", shell=True)
                 succeeded = True
             else:
                 succeeded = False
             # reply to master
             reply_packet = Packet(packet_type=PacketType.START_REPLY,
+                                  additional_info=[cur_worker_id, cur_worker_ip, succeeded])
+            serialized_reply_packet = serialize(reply_packet)
+            master_listen_socket.send(serialized_reply_packet)
+        elif packet.packet_type == PacketType.STOP_QUERY:
+            # stop worker process
+            if running_worker_process is None:
+                succeeded = False
+            else:
+                recursive_kill(running_worker_process.pid)
+                running_worker_process = None
+                succeeded = True
+            # reply to master
+            reply_packet = Packet(packet_type=PacketType.STOP_REPLY,
                                   additional_info=[cur_worker_id, cur_worker_ip, succeeded])
             serialized_reply_packet = serialize(reply_packet)
             master_listen_socket.send(serialized_reply_packet)
@@ -181,7 +222,6 @@ def trainer():
 
     # start main loop
     running_trainer_process = None
-    ctx = mp.get_context("spawn")
     while True:
         raw_packet = master2trainer_socket.recv()
         packet = deserialize(raw_packet)
@@ -192,10 +232,9 @@ def trainer():
             serialized_reply_packet = serialize(reply_packet)
             trainer2master_socket.send(serialized_reply_packet)
         elif packet.packet_type == PacketType.START_QUERY:
-            # run target process
+            # run training process
             if running_trainer_process is None:
-                running_trainer_process = ctx.Process(target=start_workload_trainer)
-                running_trainer_process.start()
+                running_trainer_process = subprocess.Popen(f"exec bash workload_train.sh", shell=True)
                 succeeded = True
             else:
                 succeeded = False
@@ -203,13 +242,35 @@ def trainer():
             reply_packet = Packet(packet_type=PacketType.START_REPLY, additional_info=succeeded)
             serialized_reply_packet = serialize(reply_packet)
             trainer2master_socket.send(serialized_reply_packet)
+        elif packet.packet_type == PacketType.STOP_QUERY:
+            # stop training process
+            if running_trainer_process is None:
+                succeeded = False
+            else:
+                recursive_kill(running_trainer_process.pid)
+                running_trainer_process = None
+                succeeded = True
+            # reply to master
+            reply_packet = Packet(packet_type=PacketType.STOP_REPLY, additional_info=succeeded)
+            serialized_reply_packet = serialize(reply_packet)
+            trainer2master_socket.send(serialized_reply_packet)
         else:
             print(f"Received unsupported packet with type {packet.packet_type}")
 
 
-def start_workload_worker(worker_idx):
-    subprocess.run(args=("bash", "workload_worker.sh", f"{worker_idx}"))
+def recursive_kill(proc_pid):
+    process = psutil.Process(proc_pid)
+    for proc in process.children(recursive=True):
+        proc.kill()
+    process.kill()
 
-
-def start_workload_trainer():
-    subprocess.run(args=("bash", "workload_train.sh"))
+# def start_workload_worker(worker_idx):
+#     subprocess.Popen(args=("bash", "workload_worker.sh", f"{worker_idx}"),
+#                      stdout=subprocess.PIPE, shell=False, preexec_fn=os.setsid)
+#     # subprocess.run(args=("bash", "workload_worker.sh", f"{worker_idx}"))
+#
+#
+# def start_workload_trainer():
+#     subprocess.Popen(args=("bash", "workload_train.sh"),
+#                      stdout=subprocess.PIPE, shell=False, preexec_fn=os.setsid)
+#     # subprocess.run(args=("bash", "workload_train.sh"))
